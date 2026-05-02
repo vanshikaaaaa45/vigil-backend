@@ -17,10 +17,9 @@ const hashStr = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const setCookie = (res, token) =>
   res.cookie('vigil_rt', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/',   // 🔥 ADD THIS
+    secure: true,
+    sameSite: 'none',
+    path: '/',
   });
 
 // ── REGISTER ──────────────────────────────────────────────────────
