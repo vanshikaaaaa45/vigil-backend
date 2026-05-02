@@ -128,7 +128,7 @@ POST /api/relay/in/:channelSlug
 
 ---
 
-## ⚡ Real-time Events
+## Real-time Events
 
 Socket.io emits:
 
