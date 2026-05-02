@@ -26,15 +26,23 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4173',
 ].filter(Boolean);
 
+// const corsOptions = {
+//   origin: (origin, callback) => {
+//     // Allow requests with no origin (curl, mobile apps, Postman)
+//     if (!origin) return callback(null, true);
+//     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+//     // Allow any vercel.app subdomain (preview deployments)
+//    //if (origin.endsWith('.vercel.app')) return callback(null, true);
+   
+//     callback(new Error(`CORS: ${origin} not allowed`));
+//   },
+//   credentials: true,
+// };
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (curl, mobile apps, Postman)
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    // Allow any vercel.app subdomain (preview deployments)
-    if (origin.endsWith('.vercel.app')) return callback(null, true);
-    callback(new Error(`CORS: ${origin} not allowed`));
-  },
+  origin: [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_URL_PREVIEW,
+  ],
   credentials: true,
 };
 
