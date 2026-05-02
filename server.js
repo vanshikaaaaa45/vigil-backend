@@ -47,10 +47,11 @@ const corsOptions = {
 // This fixes "WebSocket closed before connection established" on Railway
 const io = new Server(server, {
   cors: corsOptions,
-  transports: ['polling', 'websocket'],   // polling first — Railway needs this
-  allowEIO3: true,
+  transports:  isProd ? ['polling'] : ['polling', 'websocket'],
+  allowEIO3:   true,
   pingTimeout:  60_000,
   pingInterval: 25_000,
+  connectTimeout: 45_000,
 });
 
 app.set('io', io);
