@@ -1,0 +1,9 @@
+[phases.build]
+cmds = ["npm install"]
+
+[phases.deploy]
+cmds = ["node migrations/run.js"]
+startCmd = "node server.js"
+
+[variables]
+NODE_ENV = "production"
