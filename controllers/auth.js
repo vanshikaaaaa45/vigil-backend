@@ -14,12 +14,14 @@ const signRefresh = (userId) =>
 
 const hashStr = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
+const isProd = process.env.NODE_ENV === 'production';
+
 const setCookie = (res, token) =>
   res.cookie('vigil_rt', token, {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    path: '/',
+    secure:   isProd,
+    sameSite: isProd ? 'none' : 'lax',  // 'none' required for cross-origin (Vercel→Railway)
+    maxAge:   7 * 24 * 60 * 60 * 1000,
   });
 
 // ── REGISTER ──────────────────────────────────────────────────────
@@ -137,12 +139,7 @@ exports.logout = async (req, res) => {
   try {
     const token = req.cookies?.vigil_rt;
     if (token) await query('DELETE FROM refresh_tokens WHERE token_hash=$1', [hashStr(token)]);
-    res.clearCookie('vigil_rt', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',   // 🔥 IMPORTANT
-    });
+    res.clearCookie('vigil_rt', { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' });
     res.json({ message: 'Logged out' });
   } catch {
     res.status(500).json({ error: 'Logout failed' });
