@@ -153,6 +153,12 @@ async function checkAlertRules(userId, log) {
     if (Date.now() < cooldownEnd) continue;
 
     await query('UPDATE alert_rules SET last_triggered=NOW() WHERE id=$1', [rule.id]);
+        // Save to alert_events for history
+    await query(
+      `INSERT INTO alert_events (rule_id, user_id, count, notified)
+      VALUES ($1, $2, $3, $4)`,
+      [rule.id, userId, count, rule.notify_email]
+    );
 
     if (rule.notify_email) {
       const { rows: u } = await query('SELECT email FROM users WHERE id=$1', [userId]);
@@ -160,3 +166,9 @@ async function checkAlertRules(userId, log) {
     }
   }
 }
+// Save to alert_events for history
+await query(
+  `INSERT INTO alert_events (rule_id, user_id, count, notified)
+   VALUES ($1, $2, $3, $4)`,
+  [rule.id, userId, count, rule.notify_email]
+);

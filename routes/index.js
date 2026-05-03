@@ -49,6 +49,8 @@ router.get('/logs/stats',        requireAuth, logs.stats);
 router.get('/logs/rules',        requireAuth, logs.listRules);
 router.post('/logs/rules',       requireAuth, logs.createRule);
 router.delete('/logs/rules/:id', requireAuth, logs.deleteRule);
+router.get   ('/logs/alert-history',  requireAuth, logs.alertHistory);
+
 
 // ── Relay ─────────────────────────────────────────────────────────
 router.get   ('/relay/channels',                                  requireAuth, relay.listChannels);
