@@ -2,7 +2,7 @@ const router  = require('express').Router();
 const limit   = require('express-rate-limit');
 const { requireAuth, requireApiKey, requireAuthOrApiKey } = require('../middlewares/auth');
 const { keyRateLimit } = require('../middlewares/keyRateLimit');
-const { requireTeamAccess, requireRole, resolveTeamOwner } = require('../middlewares/team');
+const { requireTeamAccess, requireRole } = require('../middlewares/team');
 const teams = require('../controllers/teams');
 
 const auth     = require('../controllers/auth');
@@ -29,9 +29,9 @@ router.get ('/auth/me',              requireAuth, auth.getMe);
 router.patch('/auth/profile',        requireAuth, auth.updateProfile);
 
 // ── Monitors ──────────────────────────────────────────────────────
-router.get ('/monitors',             requireAuth, resolveTeamOwner, monitors.list);
-router.get ('/monitors/stats',       requireAuth, resolveTeamOwner, monitors.stats);
-router.get ('/monitors/incidents',   requireAuth, resolveTeamOwner, monitors.incidents);
+router.get ('/monitors',             requireAuth, monitors.list);
+router.get ('/monitors/stats',       requireAuth, monitors.stats);
+router.get ('/monitors/incidents',   requireAuth, monitors.incidents);
 router.get ('/monitors/:id',         requireAuth, monitors.get);
 router.get ('/monitors/:id/chart',   requireAuth, monitors.chartData);
 router.post('/monitors',             requireAuth, monitors.create);
@@ -45,9 +45,9 @@ router.post('/logs/ingest', ingestLim, requireAuthOrApiKey, keyRateLimit, (req, 
   next();
 }, logs.ingest);
 
-router.get('/logs',              requireAuth, resolveTeamOwner, logs.list);
-router.get('/logs/services',     requireAuth, resolveTeamOwner, logs.services);
-router.get('/logs/stats',        requireAuth, resolveTeamOwner, logs.stats);
+router.get('/logs',              requireAuth, logs.list);
+router.get('/logs/services',     requireAuth, logs.services);
+router.get('/logs/stats',        requireAuth, logs.stats);
 router.get('/logs/rules',        requireAuth, logs.listRules);
 router.post('/logs/rules',       requireAuth, logs.createRule);
 router.delete('/logs/rules/:id', requireAuth, logs.deleteRule);
@@ -55,7 +55,7 @@ router.get   ('/logs/alert-history',  requireAuth, logs.alertHistory);
 
 
 // ── Relay ─────────────────────────────────────────────────────────
-router.get   ('/relay/channels',                                  requireAuth, resolveTeamOwner, relay.listChannels);
+router.get   ('/relay/channels',                                  requireAuth, relay.listChannels);
 router.post  ('/relay/channels',                                  requireAuth, relay.createChannel);
 router.delete('/relay/channels/:id',                              requireAuth, relay.deleteChannel);
 router.get   ('/relay/channels/:channelId/listeners',             requireAuth, relay.listListeners);

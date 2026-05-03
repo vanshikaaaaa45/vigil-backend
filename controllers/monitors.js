@@ -16,7 +16,7 @@ exports.list = async (req, res) => {
        WHERE m.user_id=$1 AND m.status != 'deleted'
        GROUP BY m.id
        ORDER BY m.created_at ASC`,
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ monitors: rows });
   } catch (err) {
@@ -29,7 +29,7 @@ exports.list = async (req, res) => {
 exports.get = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT * FROM monitors WHERE id=$1 AND user_id=$2', [req.params.id, req.dataUserId || req.user.id]
+      'SELECT * FROM monitors WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Monitor not found' });
 
@@ -53,7 +53,7 @@ exports.create = async (req, res) => {
 
     // Free plan: max 3 monitors
     const { rows: cnt } = await query(
-      "SELECT COUNT(*) FROM monitors WHERE user_id=$1 AND status!='deleted'", [req.dataUserId || req.user.id]
+      "SELECT COUNT(*) FROM monitors WHERE user_id=$1 AND status!='deleted'", [req.user.id]
     );
     if (req.user.plan === 'free' && Number(cnt[0].count) >= 3)
       return res.status(403).json({ error: 'Free plan allows max 3 monitors. Upgrade to Pro.' });
@@ -61,7 +61,7 @@ exports.create = async (req, res) => {
     const { rows } = await query(
       `INSERT INTO monitors (user_id,name,url,method,interval_seconds,timeout_ms,expected_status,notify_email)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.dataUserId || req.user.id, name, url, method, interval_seconds, timeout_ms, expected_status, notify_email]
+      [req.user.id, name, url, method, interval_seconds, timeout_ms, expected_status, notify_email]
     );
     await addMonitorJob(rows[0]);
     res.status(201).json({ monitor: rows[0] });
@@ -82,7 +82,7 @@ exports.update = async (req, res) => {
          expected_status=COALESCE($6,expected_status), notify_email=COALESCE($7,notify_email),
          status=COALESCE($8,status)
        WHERE id=$9 AND user_id=$10 RETURNING *`,
-      [name,url,method,interval_seconds,timeout_ms,expected_status,notify_email,status, req.params.id, req.dataUserId || req.user.id]
+      [name,url,method,interval_seconds,timeout_ms,expected_status,notify_email,status, req.params.id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Monitor not found' });
 
@@ -100,7 +100,7 @@ exports.remove = async (req, res) => {
   try {
     const { rows } = await query(
       "UPDATE monitors SET status='deleted' WHERE id=$1 AND user_id=$2 RETURNING id",
-      [req.params.id, req.dataUserId || req.user.id]
+      [req.params.id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Monitor not found' });
     await removeMonitorJob(req.params.id);
@@ -116,11 +116,11 @@ exports.stats = async (req, res) => {
     const [mRow, iRow, rRow] = await Promise.all([
       query(`SELECT COUNT(*) total, COUNT(*) FILTER (WHERE last_status='up') up,
              COUNT(*) FILTER (WHERE last_status='down') down
-             FROM monitors WHERE user_id=$1 AND status='active'`, [req.dataUserId || req.user.id]),
+             FROM monitors WHERE user_id=$1 AND status='active'`, [req.user.id]),
       query(`SELECT COUNT(*) total, COUNT(*) FILTER (WHERE status='open') open
-             FROM incidents WHERE user_id=$1 AND started_at > NOW()-INTERVAL '30 days'`, [req.dataUserId || req.user.id]),
+             FROM incidents WHERE user_id=$1 AND started_at > NOW()-INTERVAL '30 days'`, [req.user.id]),
       query(`SELECT ROUND(AVG(last_response_ms)) avg
-             FROM monitors WHERE user_id=$1 AND status='active' AND last_response_ms IS NOT NULL`, [req.dataUserId || req.user.id]),
+             FROM monitors WHERE user_id=$1 AND status='active' AND last_response_ms IS NOT NULL`, [req.user.id]),
     ]);
     res.json({ monitors: mRow.rows[0], incidents: iRow.rows[0], avg_response_ms: rRow.rows[0].avg });
   } catch {
@@ -135,7 +135,7 @@ exports.incidents = async (req, res) => {
       `SELECT i.*, m.name monitor_name, m.url monitor_url
        FROM incidents i JOIN monitors m ON i.monitor_id=m.id
        WHERE i.user_id=$1 ORDER BY i.started_at DESC LIMIT 30`,
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ incidents: rows });
   } catch {
@@ -148,7 +148,7 @@ exports.checkNow = async (req, res) => {
   try {
     const { rows } = await query(
       'SELECT * FROM monitors WHERE id=$1 AND user_id=$2 AND status=$3',
-      [req.params.id, req.dataUserId || req.user.id, 'active']
+      [req.params.id, req.user.id, 'active']
     );
     if (!rows[0]) return res.status(404).json({ error: 'Monitor not found or not active' });
 

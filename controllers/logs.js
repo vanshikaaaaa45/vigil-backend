@@ -17,19 +17,19 @@ exports.ingest = async (req, res) => {
       `INSERT INTO log_entries (user_id,service,level,message,meta)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id,service,level,message,meta,timestamp`,
-      [req.dataUserId || req.user.id, service, level, message, JSON.stringify(meta)]
+      [req.user.id, service, level, message, JSON.stringify(meta)]
     );
     const log = rows[0];
 
     // Track usage (fire-and-forget)
-    trackUsage(req.dataUserId || req.user.id, 'log_ingest', req.apiKeyId || null, { level, service });
+    trackUsage(req.user.id, 'log_ingest', req.apiKeyId || null, { level, service });
 
     // Push to WebSocket room
     const io = req.app.get('io');
-    if (io) io.to(`user:${req.dataUserId || req.user.id}`).emit('log:new', log);
+    if (io) io.to(`user:${req.user.id}`).emit('log:new', log);
 
     // Evaluate alert rules (background, never blocks response)
-    checkAlertRules(req.dataUserId || req.user.id, log).catch(console.error);
+    checkAlertRules(req.user.id, log).catch(console.error);
 
     res.status(201).json({ log });
   } catch (err) {
@@ -42,7 +42,7 @@ exports.ingest = async (req, res) => {
 exports.list = async (req, res) => {
   try {
     const { service, level, search, limit=100, offset=0, from, to } = req.query;
-    let conds = ['user_id=$1'], params = [req.dataUserId || req.user.id], p = 2;
+    let conds = ['user_id=$1'], params = [req.user.id], p = 2;
 
     if (service) { conds.push(`service=$${p++}`);   params.push(service); }
     if (level)   { conds.push(`level=$${p++}`);      params.push(level);   }
@@ -70,7 +70,7 @@ exports.services = async (req, res) => {
   try {
     const { rows } = await query(
       'SELECT DISTINCT service FROM log_entries WHERE user_id=$1 ORDER BY service',
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ services: rows.map(r => r.service) });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -84,7 +84,7 @@ exports.stats = async (req, res) => {
          COUNT(*) FILTER (WHERE level='error' AND timestamp > NOW()-INTERVAL '1 hour') errors_1h,
          COUNT(*) FILTER (WHERE level='error' AND timestamp > NOW()-INTERVAL '24 hours') errors_24h
        FROM log_entries WHERE user_id=$1`,
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ stats: rows[0] });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -95,7 +95,7 @@ exports.listRules = async (req, res) => {
   try {
     const { rows } = await query(
       'SELECT * FROM alert_rules WHERE user_id=$1 ORDER BY created_at DESC',
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ rules: rows });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -120,7 +120,7 @@ exports.createRule = async (req, res) => {
           notify_email, notify_slack, notify_discord, cooldown_minutes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
-      [req.dataUserId || req.user.id, name, service||null, level||null,
+      [req.user.id, name, service||null, level||null,
        threshold, window_seconds, notify_email,
        notify_slack, notify_discord, cooldown_minutes]
     );
@@ -132,7 +132,7 @@ exports.deleteRule = async (req, res) => {
   try {
     const { rows } = await query(
       'DELETE FROM alert_rules WHERE id=$1 AND user_id=$2 RETURNING id',
-      [req.params.id, req.dataUserId || req.user.id]
+      [req.params.id, req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Rule not found' });
     res.json({ message: 'Deleted' });
@@ -150,7 +150,7 @@ exports.alertHistory = async (req, res) => {
        WHERE ae.user_id = $1
        ORDER BY ae.fired_at DESC
        LIMIT 50`,
-      [req.dataUserId || req.user.id]
+      [req.user.id]
     );
     res.json({ history: rows });
   } catch (err) {
