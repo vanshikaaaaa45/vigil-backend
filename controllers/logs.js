@@ -1,8 +1,8 @@
 const { query } = require('../config/db');
 const { sendAlertRuleFired } = require('../services/email');
-const { trackUsage } = require('../services/usage');   // ← Phase 1A
+const { trackUsage } = require('../services/usage');
 
-// ── INGEST (SDK calls this) ───────────────────────────────────────
+// ── INGEST ────────────────────────────────────────────────────────
 exports.ingest = async (req, res) => {
   try {
     const { service, level, message, meta = {} } = req.body;
@@ -21,14 +21,14 @@ exports.ingest = async (req, res) => {
     );
     const log = rows[0];
 
-    // ── Track usage (fire-and-forget, never blocks response) ──────
+    // Track usage (fire-and-forget)
     trackUsage(req.user.id, 'log_ingest', req.apiKeyId || null, { level, service });
 
     // Push to WebSocket room
     const io = req.app.get('io');
     if (io) io.to(`user:${req.user.id}`).emit('log:new', log);
 
-    // Evaluate alert rules (background)
+    // Evaluate alert rules (background, never blocks response)
     checkAlertRules(req.user.id, log).catch(console.error);
 
     res.status(201).json({ log });
@@ -38,16 +38,16 @@ exports.ingest = async (req, res) => {
   }
 };
 
-// ── QUERY LOGS ────────────────────────────────────────────────────
+// ── LIST LOGS ─────────────────────────────────────────────────────
 exports.list = async (req, res) => {
   try {
     const { service, level, search, limit=100, offset=0, from, to } = req.query;
-    let conds = ['user_id=$1'], params = [req.user.id], p=2;
+    let conds = ['user_id=$1'], params = [req.user.id], p = 2;
 
-    if (service) { conds.push(`service=$${p++}`); params.push(service); }
-    if (level)   { conds.push(`level=$${p++}`);   params.push(level);   }
-    if (from)    { conds.push(`timestamp>=$${p++}`); params.push(from); }
-    if (to)      { conds.push(`timestamp<=$${p++}`); params.push(to);   }
+    if (service) { conds.push(`service=$${p++}`);       params.push(service); }
+    if (level)   { conds.push(`level=$${p++}`);          params.push(level);   }
+    if (from)    { conds.push(`timestamp>=$${p++}`);     params.push(from);    }
+    if (to)      { conds.push(`timestamp<=$${p++}`);     params.push(to);      }
     if (search)  {
       conds.push(`to_tsvector('english',message) @@ plainto_tsquery('english',$${p++})`);
       params.push(search);
@@ -69,7 +69,8 @@ exports.list = async (req, res) => {
 exports.services = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT DISTINCT service FROM log_entries WHERE user_id=$1 ORDER BY service', [req.user.id]
+      'SELECT DISTINCT service FROM log_entries WHERE user_id=$1 ORDER BY service',
+      [req.user.id]
     );
     res.json({ services: rows.map(r => r.service) });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -93,7 +94,8 @@ exports.stats = async (req, res) => {
 exports.listRules = async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT * FROM alert_rules WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]
+      'SELECT * FROM alert_rules WHERE user_id=$1 ORDER BY created_at DESC',
+      [req.user.id]
     );
     res.json({ rules: rows });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -123,17 +125,42 @@ exports.deleteRule = async (req, res) => {
   } catch { res.status(500).json({ error: 'Failed' }); }
 };
 
-// ── ALERT RULE EVALUATION (runs after every log ingest) ──────────
+// ── ALERT HISTORY (Phase 2) ───────────────────────────────────────
+exports.alertHistory = async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT ae.id, ae.count, ae.fired_at, ae.notified,
+              ar.name   AS rule_name,
+              ar.level,
+              ar.threshold,
+              ar.window_seconds
+       FROM alert_events ae
+       JOIN alert_rules  ar ON ae.rule_id = ar.id
+       WHERE ae.user_id = $1
+       ORDER BY ae.fired_at DESC
+       LIMIT 50`,
+      [req.user.id]
+    );
+    res.json({ history: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed' });
+  }
+};
+
+// ── ALERT RULE EVALUATION ─────────────────────────────────────────
+// Runs in background after every log ingest — never blocks the response
 async function checkAlertRules(userId, log) {
   const { rows: rules } = await query(
     `SELECT * FROM alert_rules
      WHERE user_id=$1 AND is_active=TRUE
-       AND (level IS NULL OR level=$2)
+       AND (level   IS NULL OR level=$2)
        AND (service IS NULL OR service=$3)`,
     [userId, log.level, log.service]
   );
 
   for (const rule of rules) {
+    // Count logs in the sliding window
     const since = new Date(Date.now() - rule.window_seconds * 1000);
     const { rows } = await query(
       `SELECT COUNT(*) cnt FROM log_entries
@@ -146,29 +173,31 @@ async function checkAlertRules(userId, log) {
     const count = Number(rows[0].cnt);
     if (count < rule.threshold) continue;
 
-    // Cooldown: don't fire more than once per window
+    // Cooldown — don't fire again until the window expires
     const cooldownEnd = rule.last_triggered
       ? new Date(rule.last_triggered).getTime() + rule.window_seconds * 1000
       : 0;
     if (Date.now() < cooldownEnd) continue;
 
-    await query('UPDATE alert_rules SET last_triggered=NOW() WHERE id=$1', [rule.id]);
-        // Save to alert_events for history
+    // Update last_triggered timestamp
+    await query(
+      'UPDATE alert_rules SET last_triggered=NOW() WHERE id=$1',
+      [rule.id]
+    );
+
+    // Save to alert_events for history (Phase 2)
     await query(
       `INSERT INTO alert_events (rule_id, user_id, count, notified)
-      VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4)`,
       [rule.id, userId, count, rule.notify_email]
     );
 
+    // Send email alert
     if (rule.notify_email) {
-      const { rows: u } = await query('SELECT email FROM users WHERE id=$1', [userId]);
+      const { rows: u } = await query(
+        'SELECT email FROM users WHERE id=$1', [userId]
+      );
       if (u[0]) sendAlertRuleFired({ email: u[0].email }, rule, count).catch(console.error);
     }
   }
-}
-// Save to alert_events for history
-await query(
-  `INSERT INTO alert_events (rule_id, user_id, count, notified)
-   VALUES ($1, $2, $3, $4)`,
-  [rule.id, userId, count, rule.notify_email]
-);
+};
