@@ -1,6 +1,7 @@
 const router  = require('express').Router();
 const limit   = require('express-rate-limit');
 const { requireAuth, requireApiKey, requireAuthOrApiKey } = require('../middlewares/auth');
+const { keyRateLimit } = require('../middlewares/keyRateLimit');
 
 const auth     = require('../controllers/auth');
 const monitors = require('../controllers/monitors');
@@ -37,7 +38,7 @@ router.patch('/monitors/:id',        requireAuth, monitors.update);
 router.delete('/monitors/:id',       requireAuth, monitors.remove);
 
 // ── Logs ──────────────────────────────────────────────────────────
-router.post('/logs/ingest', ingestLim, requireAuthOrApiKey, (req, res, next) => {
+router.post('/logs/ingest', ingestLim, requireAuthOrApiKey, keyRateLimit, (req, res, next) => {
   req.app.get('io') && (req.io = req.app.get('io'));
   next();
 }, logs.ingest);
@@ -59,7 +60,7 @@ router.delete('/relay/channels/:channelId/listeners/:listenerId', requireAuth, r
 router.get   ('/relay/channels/:channelId/events',                requireAuth, relay.listEvents);
 router.post  ('/relay/events/:eventId/replay',                    requireAuth, relay.replay);
 router.get   ('/relay/stats',                                     requireAuth, relay.stats);
-router.post  ('/relay/in/:slug',                  requireApiKey,  relay.receive);
+router.post  ('/relay/in/:slug',                  requireApiKey,  keyRateLimit, relay.receive);
 
 // ── API Keys ──────────────────────────────────────────────────────
 router.get   ('/keys',     requireAuth, keys.list);
@@ -82,10 +83,10 @@ router.patch('/settings/notifications', requireAuth, async (req, res) => {
     const { monitor_alerts, log_alert_rules, relay_failures, weekly_summary, slack_webhook_url, discord_webhook_url } = req.body;
     const { rows } = await query(
       `UPDATE notification_settings
-       SET monitor_alerts   = COALESCE($1, monitor_alerts),
-           log_alert_rules  = COALESCE($2, log_alert_rules),
-           relay_failures   = COALESCE($3, relay_failures),
-           weekly_summary   = COALESCE($4, weekly_summary),
+       SET monitor_alerts      = COALESCE($1, monitor_alerts),
+           log_alert_rules     = COALESCE($2, log_alert_rules),
+           relay_failures      = COALESCE($3, relay_failures),
+           weekly_summary      = COALESCE($4, weekly_summary),
            slack_webhook_url   = COALESCE($5, slack_webhook_url),
            discord_webhook_url = COALESCE($6, discord_webhook_url)
        WHERE user_id=$7 RETURNING *`,
@@ -97,7 +98,7 @@ router.patch('/settings/notifications', requireAuth, async (req, res) => {
 });
 
 // Status page slug management
-router.get ('/settings/status-slug', requireAuth, status.getSlug);
+router.get  ('/settings/status-slug', requireAuth, status.getSlug);
 router.patch('/settings/status-slug', requireAuth, status.setSlug);
 
 // ── Health ────────────────────────────────────────────────────────
