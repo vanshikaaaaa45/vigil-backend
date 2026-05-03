@@ -2,6 +2,8 @@ const router  = require('express').Router();
 const limit   = require('express-rate-limit');
 const { requireAuth, requireApiKey, requireAuthOrApiKey } = require('../middlewares/auth');
 const { keyRateLimit } = require('../middlewares/keyRateLimit');
+const { requireTeamAccess, requireRole } = require('../middlewares/team');
+const teams = require('../controllers/teams');
 
 const auth     = require('../controllers/auth');
 const monitors = require('../controllers/monitors');
@@ -102,6 +104,15 @@ router.patch('/settings/notifications', requireAuth, async (req, res) => {
 // Status page slug management
 router.get  ('/settings/status-slug', requireAuth, status.getSlug);
 router.patch('/settings/status-slug', requireAuth, status.setSlug);
+
+// ── Teams ────────────────────────────────────────────────────────
+router.get   ('/teams',                                    requireAuth, teams.list);
+router.post  ('/teams',                                    requireAuth, teams.create);
+router.get   ('/teams/:teamId',                            requireAuth, requireTeamAccess, teams.get);
+router.get   ('/teams/:teamId/members',                    requireAuth, requireTeamAccess, teams.listMembers);
+router.post  ('/teams/:teamId/invite',                     requireAuth, requireTeamAccess, requireRole('admin'), teams.invite);
+router.patch ('/teams/:teamId/members/:userId',            requireAuth, requireTeamAccess, requireRole('admin'), teams.updateRole);
+router.delete('/teams/:teamId/members/:userId',            requireAuth, requireTeamAccess, teams.removeMember);
 
 // ── Health ────────────────────────────────────────────────────────
 router.get('/health', (req, res) =>
