@@ -34,7 +34,7 @@ const wrap = (body) => `
 const send = ({ to, subject, html }) =>
   transport.sendMail({ from: process.env.EMAIL_FROM, to, subject, html }).catch(console.error);
 
-// ── Templates ─────────────────────────────────────────────────────
+// ── Email templates ───────────────────────────────────────────────
 
 const sendVerification = (user, token) => {
   const url = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;
@@ -107,16 +107,50 @@ Time: ${new Date().toUTCString()}</code>
     `),
   });
 
-
 // ── Slack alerts ──────────────────────────────────────────────────
 const sendSlack = async (webhookUrl, text, emoji = ':red_circle:') => {
   if (!webhookUrl) return;
   try {
     const axios = require('axios');
-    await axios.post(webhookUrl, { text: `${emoji} *VIGIL* — ${text}` });
+    await axios.post(webhookUrl, {
+      text: `${emoji} *VIGIL* — ${text}`,
+    });
   } catch (e) {
     console.error('Slack send failed:', e.message);
   }
 };
 
-module.exports = { sendVerification, sendPasswordReset, sendMonitorDown, sendMonitorUp, sendAlertRuleFired, sendSlack };
+// ── Discord alerts ────────────────────────────────────────────────
+// Discord uses embeds — richer format than Slack plain text
+const sendDiscord = async (webhookUrl, rule, count) => {
+  if (!webhookUrl) return;
+  try {
+    const axios = require('axios');
+    await axios.post(webhookUrl, {
+      embeds: [{
+        title:       `⚠️ Alert fired: ${rule.name}`,
+        description: `**${count}** ${rule.level?.toUpperCase() || 'ANY'} events in ${rule.window_seconds / 60} min`,
+        color:       15158332,   // red: #E74C3C
+        fields: [
+          { name: 'Threshold', value: String(rule.threshold), inline: true },
+          { name: 'Actual',    value: String(count),          inline: true },
+          { name: 'Service',   value: rule.service || 'all',  inline: true },
+        ],
+        footer:    { text: 'VIGIL Alert Engine' },
+        timestamp: new Date().toISOString(),
+      }],
+    });
+  } catch (e) {
+    console.error('Discord send failed:', e.message);
+  }
+};
+
+module.exports = {
+  sendVerification,
+  sendPasswordReset,
+  sendMonitorDown,
+  sendMonitorUp,
+  sendAlertRuleFired,
+  sendSlack,
+  sendDiscord,   // ← Phase 3 NEW
+};

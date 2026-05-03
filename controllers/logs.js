@@ -1,5 +1,5 @@
 const { query } = require('../config/db');
-const { sendAlertRuleFired } = require('../services/email');
+const { sendAlertRuleFired, sendSlack, sendDiscord } = require('../services/email');  // Phase 3
 const { trackUsage } = require('../services/usage');
 
 // ── INGEST ────────────────────────────────────────────────────────
@@ -44,10 +44,10 @@ exports.list = async (req, res) => {
     const { service, level, search, limit=100, offset=0, from, to } = req.query;
     let conds = ['user_id=$1'], params = [req.user.id], p = 2;
 
-    if (service) { conds.push(`service=$${p++}`);       params.push(service); }
-    if (level)   { conds.push(`level=$${p++}`);          params.push(level);   }
-    if (from)    { conds.push(`timestamp>=$${p++}`);     params.push(from);    }
-    if (to)      { conds.push(`timestamp<=$${p++}`);     params.push(to);      }
+    if (service) { conds.push(`service=$${p++}`);   params.push(service); }
+    if (level)   { conds.push(`level=$${p++}`);      params.push(level);   }
+    if (from)    { conds.push(`timestamp>=$${p++}`); params.push(from);    }
+    if (to)      { conds.push(`timestamp<=$${p++}`); params.push(to);      }
     if (search)  {
       conds.push(`to_tsvector('english',message) @@ plainto_tsquery('english',$${p++})`);
       params.push(search);
@@ -103,12 +103,26 @@ exports.listRules = async (req, res) => {
 
 exports.createRule = async (req, res) => {
   try {
-    const { name, service, level, threshold=5, window_seconds=300, notify_email=true } = req.body;
+    const {
+      name, service, level,
+      threshold = 5, window_seconds = 300,
+      notify_email = true,
+      notify_slack = null,     // Phase 3
+      notify_discord = null,   // Phase 3
+      cooldown_minutes = 15,   // Phase 3
+    } = req.body;
+
     if (!name) return res.status(400).json({ error: 'name required' });
+
     const { rows } = await query(
-      `INSERT INTO alert_rules (user_id,name,service,level,threshold,window_seconds,notify_email)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.user.id, name, service||null, level||null, threshold, window_seconds, notify_email]
+      `INSERT INTO alert_rules
+         (user_id, name, service, level, threshold, window_seconds,
+          notify_email, notify_slack, notify_discord, cooldown_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [req.user.id, name, service||null, level||null,
+       threshold, window_seconds, notify_email,
+       notify_slack, notify_discord, cooldown_minutes]
     );
     res.status(201).json({ rule: rows[0] });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -125,15 +139,12 @@ exports.deleteRule = async (req, res) => {
   } catch { res.status(500).json({ error: 'Failed' }); }
 };
 
-// ── ALERT HISTORY (Phase 2) ───────────────────────────────────────
+// ── ALERT HISTORY ─────────────────────────────────────────────────
 exports.alertHistory = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT ae.id, ae.count, ae.fired_at, ae.notified,
-              ar.name   AS rule_name,
-              ar.level,
-              ar.threshold,
-              ar.window_seconds
+              ar.name AS rule_name, ar.level, ar.threshold, ar.window_seconds
        FROM alert_events ae
        JOIN alert_rules  ar ON ae.rule_id = ar.id
        WHERE ae.user_id = $1
@@ -149,7 +160,6 @@ exports.alertHistory = async (req, res) => {
 };
 
 // ── ALERT RULE EVALUATION ─────────────────────────────────────────
-// Runs in background after every log ingest — never blocks the response
 async function checkAlertRules(userId, log) {
   const { rows: rules } = await query(
     `SELECT * FROM alert_rules
@@ -173,31 +183,42 @@ async function checkAlertRules(userId, log) {
     const count = Number(rows[0].cnt);
     if (count < rule.threshold) continue;
 
-    // Cooldown — don't fire again until the window expires
+    // ── Phase 3: cooldown uses cooldown_minutes column ────────────
+    // Prevents spam — won't fire again until cooldown expires
+    const cooldownMs  = (rule.cooldown_minutes || 15) * 60 * 1000;
     const cooldownEnd = rule.last_triggered
-      ? new Date(rule.last_triggered).getTime() + rule.window_seconds * 1000
+      ? new Date(rule.last_triggered).getTime() + cooldownMs
       : 0;
     if (Date.now() < cooldownEnd) continue;
 
-    // Update last_triggered timestamp
-    await query(
-      'UPDATE alert_rules SET last_triggered=NOW() WHERE id=$1',
-      [rule.id]
-    );
+    // Update last_triggered
+    await query('UPDATE alert_rules SET last_triggered=NOW() WHERE id=$1', [rule.id]);
 
-    // Save to alert_events for history (Phase 2)
+    // Save to alert_events
     await query(
       `INSERT INTO alert_events (rule_id, user_id, count, notified)
        VALUES ($1, $2, $3, $4)`,
       [rule.id, userId, count, rule.notify_email]
     );
 
-    // Send email alert
+    // ── Email alert ───────────────────────────────────────────────
     if (rule.notify_email) {
-      const { rows: u } = await query(
-        'SELECT email FROM users WHERE id=$1', [userId]
-      );
+      const { rows: u } = await query('SELECT email FROM users WHERE id=$1', [userId]);
       if (u[0]) sendAlertRuleFired({ email: u[0].email }, rule, count).catch(console.error);
     }
+
+    // ── Phase 3: Slack alert (per-rule webhook) ───────────────────
+    if (rule.notify_slack) {
+      sendSlack(
+        rule.notify_slack,
+        `*${rule.name}* fired — ${count} ${rule.level?.toUpperCase() || 'ANY'} events in ${rule.window_seconds / 60}min`,
+        ':warning:'
+      ).catch(console.error);
+    }
+
+    // ── Phase 3: Discord alert (per-rule webhook) ─────────────────
+    if (rule.notify_discord) {
+      sendDiscord(rule.notify_discord, rule, count).catch(console.error);
+    }
   }
-};
+}

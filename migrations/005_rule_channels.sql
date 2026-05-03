@@ -1,0 +1,4 @@
+ALTER TABLE alert_rules
+  ADD COLUMN IF NOT EXISTS notify_slack    VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS notify_discord  VARCHAR(500),
+  ADD COLUMN IF NOT EXISTS cooldown_minutes INTEGER DEFAULT 15;
