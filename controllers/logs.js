@@ -1,5 +1,6 @@
 const { query } = require('../config/db');
 const { sendAlertRuleFired } = require('../services/email');
+const { trackUsage } = require('../services/usage');   // ← Phase 1A
 
 // ── INGEST (SDK calls this) ───────────────────────────────────────
 exports.ingest = async (req, res) => {
@@ -19,6 +20,9 @@ exports.ingest = async (req, res) => {
       [req.user.id, service, level, message, JSON.stringify(meta)]
     );
     const log = rows[0];
+
+    // ── Track usage (fire-and-forget, never blocks response) ──────
+    trackUsage(req.user.id, 'log_ingest', req.apiKeyId || null, { level, service });
 
     // Push to WebSocket room
     const io = req.app.get('io');

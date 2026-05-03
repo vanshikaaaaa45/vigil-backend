@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const axios  = require('axios');
 const { query } = require('../config/db');
+const { trackUsage } = require('../services/usage');   // ← Phase 1A
 
 // ── CHANNELS ─────────────────────────────────────────────────────
 exports.listChannels = async (req, res) => {
@@ -136,6 +137,9 @@ exports.receive = async (req, res) => {
       [ch[0].id, eventType, JSON.stringify(payload), JSON.stringify(req.headers)]
     );
 
+    // ── Track usage (fire-and-forget, never blocks response) ──────
+    trackUsage(req.user.id, 'relay_event', null, { channel: ch[0].slug, eventType });
+
     const { rows: listeners } = await query(
       'SELECT * FROM relay_listeners WHERE channel_id=$1 AND is_active=TRUE', [ch[0].id]
     );
@@ -217,7 +221,7 @@ async function deliver(event, listener, attempt) {
     const resp = await axios.post(listener.url, event.payload, {
       timeout: 10_000,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type':      'application/json',
         'X-Vigil-Event':     event.event_type,
         'X-Vigil-Event-Id':  event.id,
         'X-Vigil-Signature': `sha256=${sig}`,
