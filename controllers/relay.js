@@ -15,7 +15,7 @@ exports.listChannels = async (req, res) => {
        LEFT JOIN relay_events re    ON re.channel_id=rc.id
        WHERE rc.user_id=$1
        GROUP BY rc.id ORDER BY rc.created_at ASC`,
-      [req.user.id]
+      [req.dataUserId || req.user.id]
     );
     res.json({ channels: rows });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -28,7 +28,7 @@ exports.createChannel = async (req, res) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const { rows } = await query(
       'INSERT INTO relay_channels (user_id,name,slug,description) VALUES ($1,$2,$3,$4) RETURNING *',
-      [req.user.id, name, slug, description||null]
+      [req.dataUserId || req.user.id, name, slug, description||null]
     );
     res.status(201).json({ channel: rows[0] });
   } catch (err) {
@@ -40,7 +40,7 @@ exports.createChannel = async (req, res) => {
 exports.deleteChannel = async (req, res) => {
   try {
     const { rows } = await query(
-      'DELETE FROM relay_channels WHERE id=$1 AND user_id=$2 RETURNING id', [req.params.id, req.user.id]
+      'DELETE FROM relay_channels WHERE id=$1 AND user_id=$2 RETURNING id', [req.params.id, req.dataUserId || req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json({ message: 'Deleted' });
@@ -54,7 +54,7 @@ exports.listListeners = async (req, res) => {
       `SELECT rl.* FROM relay_listeners rl
        JOIN relay_channels rc ON rl.channel_id=rc.id
        WHERE rl.channel_id=$1 AND rc.user_id=$2 ORDER BY rl.created_at ASC`,
-      [req.params.channelId, req.user.id]
+      [req.params.channelId, req.dataUserId || req.user.id]
     );
     res.json({ listeners: rows });
   } catch { res.status(500).json({ error: 'Failed' }); }
@@ -67,7 +67,7 @@ exports.addListener = async (req, res) => {
 
     const { rows: ch } = await query(
       'SELECT id FROM relay_channels WHERE id=$1 AND user_id=$2',
-      [req.params.channelId, req.user.id]
+      [req.params.channelId, req.dataUserId || req.user.id]
     );
     if (!ch[0]) return res.status(404).json({ error: 'Channel not found' });
 
@@ -86,7 +86,7 @@ exports.removeListener = async (req, res) => {
        USING relay_channels rc
        WHERE rl.id=$1 AND rl.channel_id=rc.id AND rc.user_id=$2
        RETURNING rl.id`,
-      [req.params.listenerId, req.user.id]
+      [req.params.listenerId, req.dataUserId || req.user.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json({ message: 'Removed' });
@@ -110,7 +110,7 @@ exports.listEvents = async (req, res) => {
        LEFT JOIN relay_listeners  rl ON rd.listener_id=rl.id
        WHERE re.channel_id=$1 AND rc.user_id=$2
        GROUP BY re.id ORDER BY re.received_at DESC LIMIT 50`,
-      [req.params.channelId, req.user.id]
+      [req.params.channelId, req.dataUserId || req.user.id]
     );
     res.json({ events: rows });
   } catch (err) {
@@ -127,7 +127,7 @@ exports.receive = async (req, res) => {
     if (!eventType) return res.status(400).json({ error: 'eventType required' });
 
     const { rows: ch } = await query(
-      'SELECT * FROM relay_channels WHERE user_id=$1 AND slug=$2', [req.user.id, slug]
+      'SELECT * FROM relay_channels WHERE user_id=$1 AND slug=$2', [req.dataUserId || req.user.id, slug]
     );
     if (!ch[0]) return res.status(404).json({ error: 'Channel not found' });
 
@@ -138,7 +138,7 @@ exports.receive = async (req, res) => {
     );
 
     // ── Track usage (fire-and-forget, never blocks response) ──────
-    trackUsage(req.user.id, 'relay_event', null, { channel: ch[0].slug, eventType });
+    trackUsage(req.dataUserId || req.user.id, 'relay_event', null, { channel: ch[0].slug, eventType });
 
     const { rows: listeners } = await query(
       'SELECT * FROM relay_listeners WHERE channel_id=$1 AND is_active=TRUE', [ch[0].id]
@@ -165,7 +165,7 @@ exports.replay = async (req, res) => {
       `SELECT re.* FROM relay_events re
        JOIN relay_channels rc ON re.channel_id=rc.id
        WHERE re.id=$1 AND rc.user_id=$2`,
-      [req.params.eventId, req.user.id]
+      [req.params.eventId, req.dataUserId || req.user.id]
     );
     if (!ev[0]) return res.status(404).json({ error: 'Event not found' });
 
@@ -195,7 +195,7 @@ exports.stats = async (req, res) => {
        LEFT JOIN relay_events re    ON re.channel_id=rc.id
        LEFT JOIN relay_deliveries rd ON rd.event_id=re.id
        WHERE rc.user_id=$1`,
-      [req.user.id]
+      [req.dataUserId || req.user.id]
     );
     res.json({ stats: rows[0] });
   } catch { res.status(500).json({ error: 'Failed' }); }
