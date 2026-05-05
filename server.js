@@ -39,7 +39,7 @@ const corsOptions = {
     : cb(new Error(`CORS blocked: ${origin}`)),
   credentials: true,   // ← required for cookies to cross origins
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization','X-API-Key'],
+  allowedHeaders: ['Content-Type','Authorization','X-API-Key','X-Team-Id'],
 };
 
 // ── Socket.io  ─────────────────────────────────────────────────────
