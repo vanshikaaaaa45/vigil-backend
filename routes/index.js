@@ -48,26 +48,26 @@ router.post('/logs/ingest', ingestLim, requireAuthOrApiKey, keyRateLimit, (req, 
 router.get('/logs',              requireAuth, resolveTeamOwner, logs.list);
 router.get('/logs/services',     requireAuth, resolveTeamOwner, logs.services);
 router.get('/logs/stats',        requireAuth, resolveTeamOwner, logs.stats);
-router.get('/logs/rules',        requireAuth, logs.listRules);
+router.get('/logs/rules',        requireAuth, resolveTeamOwner, logs.listRules);
 router.post('/logs/rules',       requireAuth, logs.createRule);
 router.delete('/logs/rules/:id', requireAuth, logs.deleteRule);
-router.get   ('/logs/alert-history',  requireAuth, logs.alertHistory);
+router.get   ('/logs/alert-history',  requireAuth, resolveTeamOwner, logs.alertHistory);
 
 
 // ── Relay ─────────────────────────────────────────────────────────
 router.get   ('/relay/channels',                                  requireAuth, resolveTeamOwner, relay.listChannels);
 router.post  ('/relay/channels',                                  requireAuth, relay.createChannel);
 router.delete('/relay/channels/:id',                              requireAuth, relay.deleteChannel);
-router.get   ('/relay/channels/:channelId/listeners',             requireAuth, relay.listListeners);
+router.get   ('/relay/channels/:channelId/listeners',             requireAuth, resolveTeamOwner, relay.listListeners);
 router.post  ('/relay/channels/:channelId/listeners',             requireAuth, relay.addListener);
 router.delete('/relay/channels/:channelId/listeners/:listenerId', requireAuth, relay.removeListener);
-router.get   ('/relay/channels/:channelId/events',                requireAuth, relay.listEvents);
+router.get   ('/relay/channels/:channelId/events',                requireAuth, resolveTeamOwner, relay.listEvents);
 router.post  ('/relay/events/:eventId/replay',                    requireAuth, relay.replay);
-router.get   ('/relay/stats',                                     requireAuth, relay.stats);
+router.get   ('/relay/stats',                                     requireAuth, resolveTeamOwner, relay.stats);
 router.post  ('/relay/in/:slug',                  requireApiKey,  keyRateLimit, relay.receive);
 
 // ── API Keys ──────────────────────────────────────────────────────
-router.get   ('/keys',     requireAuth, keys.list);
+router.get   ('/keys',     requireAuth, resolveTeamOwner, keys.list);
 router.post  ('/keys',     requireAuth, keys.create);
 router.delete('/keys/:id', requireAuth, keys.remove);
 
