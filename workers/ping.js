@@ -2,7 +2,7 @@ const { Queue, Worker } = require('bullmq');
 const axios = require('axios');
 const { query } = require('../config/db');
 const { createRedisConnection } = require('../config/redis');
-const { sendMonitorDown, sendMonitorUp, sendSlack } = require('../services/email');
+const { sendMonitorDown, sendMonitorUp, sendMonitorSlow, sendSlack } = require('../services/email');
 
 const QUEUE = 'monitor-pings';
 const qConn = createRedisConnection();
@@ -33,6 +33,19 @@ const removeMonitorJob = async (monitorId) => {
   }
 };
 
+// ── Check if monitor is in a maintenance window ───────────────────
+const isInMaintenance = async (monitorId) => {
+  const { rows } = await query(
+    `SELECT id FROM maintenance_windows
+     WHERE monitor_id = $1
+       AND starts_at <= NOW()
+       AND ends_at   >= NOW()
+     LIMIT 1`,
+    [monitorId]
+  );
+  return rows.length > 0;
+};
+
 const worker = new Worker(
   QUEUE,
   async (job) => {
@@ -47,28 +60,49 @@ const worker = new Worker(
     if (!rows[0]) return;
 
     const monitor = rows[0];
-    const prev    = monitor.last_status;
 
+    // ── Skip if in maintenance window ─────────────────────────────
+    const inMaintenance = await isInMaintenance(monitorId);
+    if (inMaintenance) {
+      await query(
+        "UPDATE monitors SET last_status='maintenance', last_checked_at=NOW() WHERE id=$1",
+        [monitorId]
+      );
+      console.log(`[ping] Monitor ${monitor.name} skipped — in maintenance window`);
+      return;
+    }
+
+    const prev = monitor.last_status;
     let isUp = false, statusCode = null, responseMs = null, errorMessage = null;
 
     const t0 = Date.now();
     try {
       const resp = await axios({
-        method: monitor.method || 'GET',
-        url:    monitor.url,
-        timeout: monitor.timeout_ms || 5000,
+        method:         monitor.method || 'GET',
+        url:            monitor.url,
+        timeout:        monitor.timeout_ms || 5000,
         validateStatus: () => true,
+        responseType:   'text',   // get body as text for assertion check
       });
       responseMs = Date.now() - t0;
       statusCode = resp.status;
-      isUp = resp.status === (monitor.expected_status || 200);
-      if (isUp && responseMs > 3000) {
-        isUp = false;
-        errorMessage = `Slow response: ${responseMs}ms`;
+
+      const statusOk = resp.status === (monitor.expected_status || 200);
+
+      // ── Response body assertion ───────────────────────────────
+      const bodyText = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+      const assertOk = !monitor.assert_text || bodyText.includes(monitor.assert_text);
+
+      if (statusOk && !assertOk) {
+        isUp         = false;
+        errorMessage = `Response body missing: "${monitor.assert_text}"`;
+      } else {
+        isUp = statusOk;
       }
     } catch (err) {
       responseMs   = Date.now() - t0;
       errorMessage = err.message;
+      isUp         = false;
     }
 
     await query(
@@ -77,7 +111,10 @@ const worker = new Worker(
       [monitorId, isUp, statusCode, responseMs, errorMessage]
     );
 
-    const newStatus = isUp ? 'up' : (errorMessage?.includes('Slow') ? 'slow' : 'down');
+    // ── Determine status: up / slow / down ────────────────────────
+    const slaBreach = isUp && monitor.sla_ms && responseMs > monitor.sla_ms;
+    const newStatus = !isUp ? 'down' : slaBreach ? 'slow' : 'up';
+
     await query(
       'UPDATE monitors SET last_status=$1, last_checked_at=NOW(), last_response_ms=$2 WHERE id=$3',
       [newStatus, responseMs, monitorId]
@@ -94,12 +131,12 @@ const worker = new Worker(
       slackUrl = ns[0]?.slack_webhook_url || null;
     }
 
-    // ── BUG FIX: create incident when first check fails (prev='pending') too ──
-    const justWentDown = !isUp && (prev === 'up' || prev === 'pending');
-    const justRecovered = isUp && (prev === 'down' || prev === 'slow');
+    const justWentDown  = !isUp    && (prev === 'up' || prev === 'pending' || prev === 'slow' || prev === 'maintenance');
+    const justRecovered = isUp     && !slaBreach && (prev === 'down' || prev === 'slow' || prev === 'maintenance');
+    const justSlowed    = slaBreach && prev !== 'slow';
 
+    // ── DOWN ──────────────────────────────────────────────────────
     if (justWentDown) {
-      // Guard against duplicate open incidents
       const { rows: open } = await query(
         "SELECT id FROM incidents WHERE monitor_id=$1 AND status='open'", [monitorId]
       );
@@ -120,6 +157,18 @@ const worker = new Worker(
       ).catch(console.error);
     }
 
+    // ── SLOW (SLA breach) ─────────────────────────────────────────
+    if (justSlowed) {
+      if (monitor.notify_email) {
+        sendMonitorSlow(user, monitor, responseMs).catch(console.error);
+      }
+      sendSlack(slackUrl,
+        `*${monitor.name}* is SLOW — ${responseMs}ms (SLA: ${monitor.sla_ms}ms)\n${monitor.url}`,
+        ':warning:'
+      ).catch(console.error);
+    }
+
+    // ── RECOVERED ─────────────────────────────────────────────────
     if (justRecovered) {
       await query(
         `UPDATE incidents
