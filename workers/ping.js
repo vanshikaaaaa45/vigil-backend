@@ -2,7 +2,7 @@ const { Queue, Worker } = require('bullmq');
 const axios = require('axios');
 const { query } = require('../config/db');
 const { createRedisConnection } = require('../config/redis');
-const { sendMonitorDown, sendMonitorUp, sendMonitorSlow, sendSlack } = require('../services/email');
+const { sendMonitorDown, sendMonitorUp, sendSlack } = require('../services/email');
 
 const QUEUE = 'monitor-pings';
 const qConn = createRedisConnection();
@@ -77,9 +77,7 @@ const worker = new Worker(
       [monitorId, isUp, statusCode, responseMs, errorMessage]
     );
 
-    // Determine status: up, slow (SLA breached), or down
-    const slaBreach = isUp && monitor.sla_ms && responseMs > monitor.sla_ms;
-    const newStatus = !isUp ? 'down' : slaBreach ? 'slow' : 'up';
+    const newStatus = isUp ? 'up' : (errorMessage?.includes('Slow') ? 'slow' : 'down');
     await query(
       'UPDATE monitors SET last_status=$1, last_checked_at=NOW(), last_response_ms=$2 WHERE id=$3',
       [newStatus, responseMs, monitorId]
@@ -97,10 +95,8 @@ const worker = new Worker(
     }
 
     // ── BUG FIX: create incident when first check fails (prev='pending') too ──
-    const justWentDown  = !isUp && (prev === 'up' || prev === 'pending' || prev === 'slow');
-    const justRecovered = isUp && !slaBreach && (prev === 'down' || prev === 'slow');
-    const justSlowed    = slaBreach && prev !== 'slow';
-    const stillSlow     = slaBreach && prev === 'slow';
+    const justWentDown = !isUp && (prev === 'up' || prev === 'pending');
+    const justRecovered = isUp && (prev === 'down' || prev === 'slow');
 
     if (justWentDown) {
       // Guard against duplicate open incidents
@@ -121,16 +117,6 @@ const worker = new Worker(
       sendSlack(slackUrl,
         `*${monitor.name}* is DOWN\n>${errorMessage || `HTTP ${statusCode}`}\n${monitor.url}`,
         ':red_circle:'
-      ).catch(console.error);
-    }
-
-    if (justSlowed) {
-      if (monitor.notify_email) {
-        sendMonitorSlow(user, monitor, responseMs).catch(console.error);
-      }
-      sendSlack(slackUrl,
-        `*${monitor.name}* is SLOW — ${responseMs}ms (SLA: ${monitor.sla_ms}ms)\n${monitor.url}`,
-        ':warning:'
       ).catch(console.error);
     }
 
