@@ -48,7 +48,7 @@ exports.get = async (req, res) => {
 // ── CREATE monitor ────────────────────────────────────────────────
 exports.create = async (req, res) => {
   try {
-    const { name, url, method='GET', interval_seconds=60, timeout_ms=5000, expected_status=200, notify_email=true } = req.body;
+    const { name, url, method='GET', interval_seconds=60, timeout_ms=5000, expected_status=200, notify_email=true, sla_ms=null } = req.body;
     if (!name || !url) return res.status(400).json({ error: 'name and url required' });
 
     // Free plan: max 3 monitors
@@ -59,9 +59,9 @@ exports.create = async (req, res) => {
       return res.status(403).json({ error: 'Free plan allows max 3 monitors. Upgrade to Pro.' });
 
     const { rows } = await query(
-      `INSERT INTO monitors (user_id,name,url,method,interval_seconds,timeout_ms,expected_status,notify_email)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.dataUserId || req.user.id, name, url, method, interval_seconds, timeout_ms, expected_status, notify_email]
+      `INSERT INTO monitors (user_id,name,url,method,interval_seconds,timeout_ms,expected_status,notify_email,sla_ms)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [req.dataUserId || req.user.id, name, url, method, interval_seconds, timeout_ms, expected_status, notify_email, sla_ms || null]
     );
     await addMonitorJob(rows[0]);
     res.status(201).json({ monitor: rows[0] });

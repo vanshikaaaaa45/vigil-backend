@@ -107,6 +107,22 @@ Time: ${new Date().toUTCString()}</code>
     `),
   });
 
+const sendMonitorSlow = (user, monitor, responseMs) =>
+  send({
+    to: user.email,
+    subject: `🐢 Slow: ${monitor.name}`,
+    html: wrap(`
+      <h2>Monitor is <span style="color:#f59e0b;font-weight:700">SLOW</span></h2>
+      <p><strong>${monitor.name}</strong> exceeded its SLA threshold.</p>
+      <code>URL: ${monitor.url}
+Response time: ${responseMs}ms
+SLA threshold: ${monitor.sla_ms}ms
+Time: ${new Date().toUTCString()}</code>
+      <a class="btn" href="${process.env.FRONTEND_URL}/watch">View in VIGIL →</a>
+      <p>The monitor is still up but responding slowly.</p>
+    `),
+  });
+
 // ── Slack alerts ──────────────────────────────────────────────────
 const sendSlack = async (webhookUrl, text, emoji = ':red_circle:') => {
   if (!webhookUrl) return;
@@ -147,6 +163,7 @@ const sendDiscord = async (webhookUrl, rule, count) => {
 
 module.exports = {
   sendVerification,
+  sendMonitorSlow,
   sendPasswordReset,
   sendMonitorDown,
   sendMonitorUp,
