@@ -12,6 +12,8 @@ const relay    = require('../controllers/relay');
 const keys     = require('../controllers/keys');
 const status   = require('../controllers/status');
 const { query } = require('../config/db');
+const { checkLimit } = require('../middlewares/limits');
+const maintenance = require('../controllers/maintenance');
 
 // ── Rate limiters ─────────────────────────────────────────────────
 const authLim   = limit({ windowMs: 15*60*1000, max: 10,  message: { error: 'Too many attempts' } });
