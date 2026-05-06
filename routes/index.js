@@ -3,6 +3,7 @@ const limit   = require('express-rate-limit');
 const { requireAuth, requireApiKey, requireAuthOrApiKey } = require('../middlewares/auth');
 const { keyRateLimit } = require('../middlewares/keyRateLimit');
 const { requireTeamAccess, requireRole, resolveTeamOwner } = require('../middlewares/team');
+const { checkLimit } = require('../middlewares/limits');
 const teams = require('../controllers/teams');
 
 const auth     = require('../controllers/auth');
@@ -34,7 +35,7 @@ router.get ('/monitors/stats',       requireAuth, resolveTeamOwner, monitors.sta
 router.get ('/monitors/incidents',   requireAuth, resolveTeamOwner, monitors.incidents);
 router.get ('/monitors/:id',         requireAuth, monitors.get);
 router.get ('/monitors/:id/chart',   requireAuth, monitors.chartData);
-router.post('/monitors',             requireAuth, monitors.create);
+router.post('/monitors',             requireAuth, checkLimit('monitors'), monitors.create);
 router.post('/monitors/:id/check',   requireAuth, monitors.checkNow);
 router.patch('/monitors/:id',        requireAuth, monitors.update);
 router.delete('/monitors/:id',       requireAuth, monitors.remove);
@@ -56,7 +57,7 @@ router.get   ('/logs/alert-history',  requireAuth, resolveTeamOwner, logs.alertH
 
 // ── Relay ─────────────────────────────────────────────────────────
 router.get   ('/relay/channels',                                  requireAuth, resolveTeamOwner, relay.listChannels);
-router.post  ('/relay/channels',                                  requireAuth, relay.createChannel);
+router.post  ('/relay/channels',                                  requireAuth, checkLimit('relay_channels'), relay.createChannel);
 router.delete('/relay/channels/:id',                              requireAuth, relay.deleteChannel);
 router.get   ('/relay/channels/:channelId/listeners',             requireAuth, resolveTeamOwner, relay.listListeners);
 router.post  ('/relay/channels/:channelId/listeners',             requireAuth, relay.addListener);
